@@ -14,12 +14,15 @@ if ((bool)$EXT_CONFIG['enableBESSO']) {
 
 // Visually change the record icon for FE/BE users and groups
 if (version_compare(TYPO3_version, '7.6', '>=')) {
-    $GLOBALS['TYPO3_CONF_VARS']['SC_OPTIONS']['TYPO3\\CMS\\Core\\Imaging\\IconFactory']['overrideIconOverlay'][] = 'Causal\\IgLdapSsoAuth\\Hooks\\IconFactory';
+    $GLOBALS['TYPO3_CONF_VARS']['SC_OPTIONS']['TYPO3\\CMS\\Core\\Imaging\\IconFactory']['overrideIconOverlay'][] =
+        \Causal\IgLdapSsoAuth\Hooks\IconFactory::class;
 } else {
-    $GLOBALS['TYPO3_CONF_VARS']['SC_OPTIONS']['t3lib/class.t3lib_iconworks.php']['overrideIconOverlay'][] = 'EXT:' . $_EXTKEY . '/Classes/Hooks/DatabaseRecordListIconUtility.php:Causal\\IgLdapSsoAuth\\Hooks\\DatabaseRecordListIconUtility';
+    $GLOBALS['TYPO3_CONF_VARS']['SC_OPTIONS']['t3lib/class.t3lib_iconworks.php']['overrideIconOverlay'][] =
+        \Causal\IgLdapSsoAuth\Hooks\DatabaseRecordListIconUtility::class;
 }
 
-$GLOBALS['TYPO3_CONF_VARS']['SC_OPTIONS']['typo3/class.db_list_extra.inc']['getTable'][] = 'EXT:' . $_EXTKEY . '/Classes/Hooks/DatabaseRecordListIconUtility.php:Causal\\IgLdapSsoAuth\\Hooks\\DatabaseRecordListIconUtility';
+$GLOBALS['TYPO3_CONF_VARS']['SC_OPTIONS']['typo3/class.db_list_extra.inc']['getTable'][] =
+    \Causal\IgLdapSsoAuth\Hooks\DatabaseRecordListIconUtility::class;
 
 // Service configuration
 $subTypesArr = [];
@@ -33,7 +36,8 @@ if ($EXT_CONFIG['enableBELDAPAuthentication']) {
     $subTypesArr[] = 'getUserBE';
     $subTypesArr[] = 'authUserBE';
 
-    $GLOBALS['TYPO3_CONF_VARS']['SC_OPTIONS']['ext/setup/mod/index.php']['modifyUserDataBeforeSave'][] = 'EXT:' . $_EXTKEY . '/Classes/Hooks/SetupModuleController.php:Causal\\IgLdapSsoAuth\\Hooks\\SetupModuleController->preprocessData';
+    $GLOBALS['TYPO3_CONF_VARS']['SC_OPTIONS']['ext/setup/mod/index.php']['modifyUserDataBeforeSave'][] =
+        \Causal\IgLdapSsoAuth\Hooks\SetupModuleController::class . '->preprocessData';
 }
 if (is_array($subTypesArr)) {
     $subTypesArr = array_unique($subTypesArr);
@@ -41,7 +45,8 @@ if (is_array($subTypesArr)) {
 }
 
 // Register hook for \TYPO3\CMS\Core\DataHandling\DataHandler
-$GLOBALS['TYPO3_CONF_VARS']['SC_OPTIONS']['t3lib/class.t3lib_tcemain.php']['processDatamapClass'][] = 'EXT:' . $_EXTKEY . '/Classes/Hooks/DataHandler.php:Causal\\IgLdapSsoAuth\\Hooks\\DataHandler';
+$GLOBALS['TYPO3_CONF_VARS']['SC_OPTIONS']['t3lib/class.t3lib_tcemain.php']['processDatamapClass'][] =
+    \Causal\IgLdapSsoAuth\Hooks\DataHandler::class;
 
 // Register the import users Scheduler task
 $GLOBALS['TYPO3_CONF_VARS']['SC_OPTIONS']['scheduler']['tasks']['Causal\\IgLdapSsoAuth\\Task\\ImportUsers'] = [
@@ -68,12 +73,14 @@ $GLOBALS['TYPO3_CONF_VARS']['SC_OPTIONS']['scheduler']['tasks']['Causal\\IgLdapS
         'os' => '',
         'exec' => '',
 
-        'className' => 'Causal\\IgLdapSsoAuth\\Service\\AuthenticationService',
+        'className' => \Causal\IgLdapSsoAuth\Service\AuthenticationService::class,
     ]
 );
 
 // Register type converters
-\TYPO3\CMS\Extbase\Utility\ExtensionUtility::registerTypeConverter('Causal\\IgLdapSsoAuth\\Property\\TypeConverter\\ConfigurationConverter');
+\TYPO3\CMS\Extbase\Utility\ExtensionUtility::registerTypeConverter(
+    \Causal\IgLdapSsoAuth\Property\TypeConverter\ConfigurationConverter::class
+);
 
 // User have save doc new button
 \TYPO3\CMS\Core\Utility\ExtensionManagementUtility::addUserTSConfig('options.saveDocNew.tx_igldapssoauth_config=1');
