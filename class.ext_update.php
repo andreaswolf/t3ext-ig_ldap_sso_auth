@@ -39,9 +39,6 @@ class ext_update extends \TYPO3\CMS\Backend\Module\BaseScriptClass
     /** @var string */
     protected $table = 'tx_igldapssoauth_config';
 
-    /** @var \TYPO3\CMS\Core\Database\DatabaseConnection */
-    protected $databaseConnection;
-
     /**
      * Default constructor.
      */
@@ -85,20 +82,26 @@ class ext_update extends \TYPO3\CMS\Backend\Module\BaseScriptClass
         $updateNeeded = false;
         $mapping = $this->getMapping();
 
+        $connection = \TYPO3\CMS\Core\Utility\GeneralUtility::makeInstance(\TYPO3\CMS\Core\Database\ConnectionPool::class)
+            ->getConnectionForTable($this->table);
+        $qb = $connection->createQueryBuilder();
+
         $where = [];
         foreach ($mapping as $configKey => $field) {
             if (!empty($this->configuration[$configKey])) {
                 // Global setting present => should be migrated if not already done
                 $updateNeeded = true;
             }
-            $where[] = $field . '=' . $this->databaseConnection->fullQuoteStr('', $this->table);
+            $where[] = $qb->expr()->eq($field, $this->table);
         }
         if ($updateNeeded) {
-            $oldConfigurationRecords = $this->databaseConnection->exec_SELECTcountRows(
-                '*',
-                $this->table,
-                implode(' AND ', $where)
-            );
+            $oldConfigurationRecords = $qb
+                ->count('*')
+                ->from($this->table)
+                ->where(...$where)
+                ->execute()
+                ->fetchColumn(0);
+
             $updateNeeded = ($oldConfigurationRecords > 0);
         }
 
@@ -112,11 +115,19 @@ class ext_update extends \TYPO3\CMS\Backend\Module\BaseScriptClass
      */
     protected function checkV12ToV13()
     {
-        $oldConfigurationRecords = $this->databaseConnection->exec_SELECTcountRows(
-            '*',
-            $this->table,
-            'group_membership=0'
-        );
+        $connection = \TYPO3\CMS\Core\Utility\GeneralUtility::makeInstance(\TYPO3\CMS\Core\Database\ConnectionPool::class)
+            ->getConnectionForTable($this->table);
+        $qb = $connection->createQueryBuilder();
+
+        $oldConfigurationRecords = $qb
+            ->count('*')
+            ->from($this->table)
+            ->where(
+                $qb->expr()->eq('group_membership', 0)
+            )
+            ->execute()
+            ->fetchColumn(0);
+
         return $oldConfigurationRecords > 0;
     }
 
@@ -197,6 +208,10 @@ class ext_update extends \TYPO3\CMS\Backend\Module\BaseScriptClass
     {
         $mapping = $this->getMapping();
 
+        $connection = \TYPO3\CMS\Core\Utility\GeneralUtility::makeInstance(\TYPO3\CMS\Core\Database\ConnectionPool::class)
+            ->getConnectionForTable($this->table);
+        $qb = $connection->createQueryBuilder();
+
         $fieldValues = [
             'tstamp' => $GLOBALS['EXEC_TIME'],
         ];
@@ -206,21 +221,27 @@ class ext_update extends \TYPO3\CMS\Backend\Module\BaseScriptClass
                 // Global setting present => should be migrated
                 $fieldValues[$field] = $this->configuration[$configKey];
             }
-            $where[] = $field . '=' . $this->databaseConnection->fullQuoteStr('', $this->table);
+            $where[] = $qb->expr()->eq($field, $this->table);
         }
-        $oldConfigurationRecords = $this->databaseConnection->exec_SELECTgetRows(
-            'uid',
-            $this->table,
-            implode(' AND ', $where)
-        );
+        $oldConfigurationRecords = $qb
+            ->select('uid')
+            ->from($this->table)
+            ->where(...$where)
+            ->execute()
+            ->fetchAll(\PDO::FETCH_ASSOC);
 
         $i = 0;
         foreach ($oldConfigurationRecords as $oldConfigurationRecord) {
-            $this->databaseConnection->exec_UPDATEquery(
-                $this->table,
-                'uid=' . $oldConfigurationRecord['uid'],
-                $fieldValues
-            );
+            $qb = $connection->createQueryBuilder();
+            $qb
+                ->update($this->table)
+                ->where(
+                    $qb->expr()->eq('uid', $oldConfigurationRecord['uid'])
+                )
+                ->values($fieldValues);
+
+            $qb->execute()->execute();
+
             $i++;
         }
 

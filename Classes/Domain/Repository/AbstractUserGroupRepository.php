@@ -14,6 +14,7 @@
 
 namespace Causal\IgLdapSsoAuth\Domain\Repository;
 
+use TYPO3\CMS\Core\Database\ConnectionPool;
 use TYPO3\CMS\Core\Utility\GeneralUtility;
 use TYPO3\CMS\Extbase\DomainObject\AbstractEntity;
 
@@ -66,11 +67,16 @@ abstract class AbstractUserGroupRepository
      */
     public function findByUid($uid)
     {
-        $row = $this->getDatabaseConnection()->exec_SELECTgetSingleRow(
-            $this->selectFields,
-            $this->tableName,
-            'uid=' . (int)$uid
-        );
+        $conn = GeneralUtility::makeInstance(ConnectionPool::class)->getConnectionForTable($this->tableName);
+        $queryBuilder = $conn->createQueryBuilder();
+        $stmt = $queryBuilder
+            ->select(...explode(',', $this->selectFields))
+            ->where(
+                $queryBuilder->expr()->eq('uid', (int)$uid)
+            )
+            ->execute();
+
+        $row = $stmt->fetch(\PDO::FETCH_ASSOC);
 
         if ($row) {
             $userGroup = GeneralUtility::makeInstance($this->className);
@@ -95,16 +101,6 @@ abstract class AbstractUserGroupRepository
             $propertyName = GeneralUtility::underscoredToLowerCamelCase($field);
             $object->_setProperty($propertyName, $value);
         }
-    }
-
-    /**
-     * Returns the database connection.
-     *
-     * @return \TYPO3\CMS\Core\Database\DatabaseConnection
-     */
-    protected static function getDatabaseConnection()
-    {
-        return $GLOBALS['TYPO3_DB'];
     }
 
 }

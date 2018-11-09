@@ -14,6 +14,8 @@
 
 namespace Causal\IgLdapSsoAuth\Domain\Repository;
 
+use TYPO3\CMS\Core\Database\Connection;
+use TYPO3\CMS\Core\Database\ConnectionPool;
 use TYPO3\CMS\Core\Utility\ExtensionManagementUtility;
 use TYPO3\CMS\Core\Utility\GeneralUtility;
 use Causal\IgLdapSsoAuth\Exception\InvalidUserTableException;
@@ -54,13 +56,15 @@ class Typo3UserRepository
         }
 
         $newUser = [];
-        $fieldsConfiguration = static::getDatabaseConnection()->admin_get_fields($table);
+        // TODO adjust
+        $tableDetails = static::getDatabaseConnection($table)->getSchemaManager()->listTableDetails($table);
 
-        foreach ($fieldsConfiguration as $field => $configuration) {
-            if ($configuration['Null'] === 'NO' && $configuration['Default'] === null) {
+        foreach ($tableDetails->getColumns() as $column) {
+            $field = $column->getName();
+            if ($column->getNotnull() === false && $column->getDefault() === null) {
                 $newUser[$field] = '';
             } else {
-                $newUser[$field] = $configuration['Default'];
+                $newUser[$field] = $column->getDefault();
             }
             if (!empty($GLOBALS['TCA'][$table]['columns'][$field]['config']['default'])) {
                 $newUser[$field] = $GLOBALS['TCA'][$table]['columns'][$field]['config']['default'];
@@ -92,40 +96,56 @@ class Typo3UserRepository
         }
 
         $users = [];
-        $databaseConnection = static::getDatabaseConnection();
+        $databaseConnection = static::getDatabaseConnection($table);
 
         if ($uid) {
             // Search with uid
-            $users = $databaseConnection->exec_SELECTgetRows(
-                '*',
+            $users = $databaseConnection->select(
+                ['*'],
                 $table,
-                'uid=' . (int)$uid
-            );
+                [
+                    'uid' => (int)$uid
+                ]
+            )
+            ->fetchAll(\PDO::FETCH_ASSOC);
         } elseif (!empty($dn)) {
             // Search with DN (or fall back to username) and pid
-            $where = '(' . 'tx_igldapssoauth_dn=' . $databaseConnection->fullQuoteStr($dn, $table);
+            $queryBuilder = $databaseConnection->createQueryBuilder();
+            $queryBuilder
+                ->select('*')
+                ->from($table)
+                ->orderBy('tx_igldapssoauth_dn', 'DESC')
+                ->addOrderBy('deleted', 'ASC');
+
+            $orParts = [
+                $queryBuilder->where('tx_igldapssoauth_dn', $queryBuilder->quote($dn))
+            ];
             if (!empty($username)) {
                 // This additional condition will automatically add the mapping between
                 // a local user unrelated to LDAP and a corresponding LDAP user
-                $where .= ' OR username=' . $databaseConnection->fullQuoteStr($username, $table);
+                $orParts[] = $queryBuilder->expr()->eq('username', $queryBuilder->quote($username));
             }
-            $where .= ')' . ($pid ? ' AND pid=' . (int)$pid : '');
+            $queryBuilder->where($queryBuilder->expr()->orX(...$orParts));
+            if ($pid) {
+                $queryBuilder->andWhere($queryBuilder->expr()->eq('pid', (int)$pid));
+            }
 
-            $users = $databaseConnection->exec_SELECTgetRows(
-                '*',
-                $table,
-                $where,
-                '',
-                'tx_igldapssoauth_dn DESC, deleted ASC'    // rows from LDAP first, then privilege active records
-            );
+            $users = $queryBuilder
+                ->execute()
+                ->fetchAll(\PDO::FETCH_ASSOC);
         } elseif (!empty($username)) {
             // Search with username and pid
-            $users = $databaseConnection->exec_SELECTgetRows(
-                '*',
-                $table,
-                'username=' . $databaseConnection->fullQuoteStr($username, $table)
-                . ($pid ? ' AND pid=' . (int)$pid : '')
-            );
+            $queryBuilder = $databaseConnection->createQueryBuilder();
+            $queryBuilder
+                ->select('*')
+                ->from($table)
+                ->where('username', $queryBuilder->quote($username));
+
+            if ($pid) {
+                $queryBuilder->andWhere($queryBuilder->expr()->eq('pid', (int)$pid));
+            }
+
+            $users = $queryBuilder->execute()->fetchAll(\PDO::FETCH_ASSOC);
         }
 
         // Return TYPO3 users.
@@ -147,20 +167,22 @@ class Typo3UserRepository
             throw new InvalidUserTableException('Invalid table "' . $table . '"', 1404891712);
         }
 
-        $databaseConnection = static::getDatabaseConnection();
+        $databaseConnection = static::getDatabaseConnection($table);
 
-        $databaseConnection->exec_INSERTquery(
+        $databaseConnection->insert(
             $table,
             $data,
             false
         );
-        $uid = $databaseConnection->sql_insert_id();
+        $uid = $databaseConnection->lastInsertId();
 
-        $newRow = $databaseConnection->exec_SELECTgetSingleRow(
+        $newRow = $databaseConnection->select(
             '*',
             $table,
-            'uid=' . (int)$uid
-        );
+            [
+                'uid' => (int)$uid
+            ]
+        )->fetch(\PDO::FETCH_ASSOC);
 
         NotificationUtility::dispatch(
             __CLASS__,
@@ -188,18 +210,19 @@ class Typo3UserRepository
             throw new InvalidUserTableException('Invalid table "' . $table . '"', 1404891732);
         }
 
-        $databaseConnection = static::getDatabaseConnection();
+        $databaseConnection = static::getDatabaseConnection($table);
 
         $cleanData = $data;
         unset($cleanData['__extraData']);
 
-        $databaseConnection->exec_UPDATEquery(
+        $databaseConnection->update(
             $table,
-            'uid=' . (int)$data['uid'],
             $cleanData,
-            false
+            [
+                'uid' => (int)$data['uid']
+            ]
         );
-        $success = $databaseConnection->sql_errno() == 0;
+        $success = $databaseConnection->errorCode() === 0;
 
         if ($success) {
             NotificationUtility::dispatch(
@@ -233,10 +256,12 @@ class Typo3UserRepository
             if (isset($GLOBALS['TCA'][$table]['ctrl']['tstamp'])) {
                 $fields[$GLOBALS['TCA'][$table]['ctrl']['tstamp']] = $GLOBALS['EXEC_TIME'];
             }
-            static::getDatabaseConnection()->exec_UPDATEquery(
+            static::getDatabaseConnection($table)->update(
                 $table,
-                'tx_igldapssoauth_id = ' . (int)$uid,
-                $fields
+                $fields,
+                [
+                    'tx_igldapssoauth_id' => (int)$uid
+                ]
             );
 
             NotificationUtility::dispatch(
@@ -268,10 +293,12 @@ class Typo3UserRepository
             if (isset($GLOBALS['TCA'][$table]['ctrl']['tstamp'])) {
                 $fields[$GLOBALS['TCA'][$table]['ctrl']['tstamp']] = $GLOBALS['EXEC_TIME'];
             }
-            static::getDatabaseConnection()->exec_UPDATEquery(
+            static::getDatabaseConnection($table)->update(
                 $table,
-                'tx_igldapssoauth_id = ' . (int)$uid,
-                $fields
+                $fields,
+                [
+                    'tx_igldapssoauth_id' => (int)$uid
+                ]
             );
 
             NotificationUtility::dispatch(
@@ -315,17 +342,17 @@ class Typo3UserRepository
             $usergroup = GeneralUtility::intExplode(',', $typo3User['usergroup'], true);
             $localUserGroups = [];
             if (!empty($usergroup)) {
-                $database = static::getDatabaseConnection();
-                $rows = $database->exec_SELECTgetRows(
-                    'uid',
-                    $table,
-                    'uid IN (' . implode(',', $usergroup) . ') AND tx_igldapssoauth_dn=' . $database->fullQuoteStr('', $table),
-                    '',
-                    '',
-                    '',
-                    'uid'
-                );
-                $localUserGroups = array_keys($rows);
+                $database = static::getDatabaseConnection($table);
+                $queryBuilder = $database->createQueryBuilder();
+                // TODO is this correct?
+                $localUserGroups = $queryBuilder
+                    ->select('uid')
+                    ->from($table)
+                    ->where(
+                        $queryBuilder->expr()->in('uid', $usergroup),
+                        $queryBuilder->expr()->eq('tx_igldapssoauth_dn', '')
+                    )
+                    ->execute()->fetchAll(\PDO::FETCH_COLUMN, 0);
             }
 
             foreach ($localUserGroups as $uid) {
@@ -387,11 +414,11 @@ class Typo3UserRepository
     /**
      * Returns the database connection.
      *
-     * @return \TYPO3\CMS\Core\Database\DatabaseConnection
+     * @return Connection
      */
-    protected static function getDatabaseConnection()
+    protected static function getDatabaseConnection($table)
     {
-        return $GLOBALS['TYPO3_DB'];
+        return GeneralUtility::makeInstance(ConnectionPool::class)->getConnectionForTable($table);
     }
 
 }

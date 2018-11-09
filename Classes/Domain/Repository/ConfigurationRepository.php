@@ -14,6 +14,7 @@
 
 namespace Causal\IgLdapSsoAuth\Domain\Repository;
 
+use TYPO3\CMS\Core\Database\ConnectionPool;
 use TYPO3\CMS\Core\Utility\GeneralUtility;
 use TYPO3\CMS\Backend\Utility\BackendUtility;
 
@@ -58,9 +59,15 @@ class ConfigurationRepository
      */
     public function findAll()
     {
-        $where = '1=1' . $this->getWhereClauseForEnabledFields();
-
-        $rows = static::getDatabaseConnection()->exec_SELECTgetRows('*', $this->table, $where, '', 'sorting');
+        // TODO add BE user enable fields if fetchDisabledRecords is enabled
+        $rows = static::getDatabaseConnection($this->table)->select(
+                ['*'],
+                $this->table,
+                '',
+                '',
+                'sorting'
+            )
+            ->fetchAll(\PDO::FETCH_ASSOC);
 
 
         if (!empty($this->config) && (bool)$this->config['useExtConfConfiguration']) {
@@ -90,8 +97,14 @@ class ConfigurationRepository
         if (!empty($this->config) && $this->config['useExtConfConfiguration'] && intval($this->config['configuration']['uid']) === $uid) {
             $row = $this->config['configuration'];
         } else {
-            $where = 'uid=' . (int)$uid . $this->getWhereClauseForEnabledFields();
-            $row = static::getDatabaseConnection()->exec_SELECTgetSingleRow('*', $this->table, $where);
+            // TODO add BE user enable fields if fetchDisabledRecords is enabled
+            $row = static::getDatabaseConnection($this->table)
+                ->select(
+                    ['*'],
+                    $this->table,
+                    ['uid' => (int)$uid]
+                )
+                ->fetch(\PDO::FETCH_ASSOC);
         }
 
         if ($row) {
@@ -215,11 +228,11 @@ class ConfigurationRepository
     /**
      * Returns the database connection.
      *
-     * @return \TYPO3\CMS\Core\Database\DatabaseConnection
+     * @return \TYPO3\CMS\Core\Database\Connection
      */
-    protected static function getDatabaseConnection()
+    protected static function getDatabaseConnection($table)
     {
-        return $GLOBALS['TYPO3_DB'];
+        return GeneralUtility::makeInstance(ConnectionPool::class)->getConnectionForTable($table);
     }
 
     /**
